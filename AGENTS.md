@@ -9,6 +9,11 @@ The core objective is to modernize the application and integrate AI features to 
 - Upgrade dependencies and codebase.
 - Implement AI-driven features for reporting.
 
+## Methodology
+- **Testing**: All implementations must be correctly verified. 
+  - For automated tests (docker, logs, HTTP calls), the agent will perform them and report the results.
+  - For manual testing (e.g., frontend visual checks), the agent will provide the user with the link and instructions to test it.
+
 ## Changes Log
 - Initialized `AGENTS.md`.
 
