@@ -97,46 +97,63 @@ The core objective is to modernize the application and integrate AI features to 
 - Added "Advanced Settings" section with system prompt and user prompt text areas
 - Added i18n translation keys for all AI settings labels in all four locale files (en-US, fr-FR, de-DE, zh-CN)
 
-### AI features (uncommitted, on `main` branch)
+### Dev environment stabilization (on `main` branch)
+- Added explicit `autodoc-net` bridge network to `docker-compose-dev.yml`; all services join it by name, replacing fragile `links` directives — prevents network loss on container recreate
+- Fixed ChromaDB volume mount path (`/chroma/chroma` → `/data`) so persistent vector data actually survives restarts
+- Added `backend/nodemon.json` excluding `config.json` from watch, preventing an infinite restart loop when JWT secrets are auto-generated into that file; mounted into the backend container via compose
+- Removed wasteful `COPY . .` from `backend/Dockerfile.dev` (source is bind-mounted at runtime)
+- Restored stable JWT secrets in `backend/src/config/config.json` dev section so tokens survive backend restarts
+- Fixed Vue Router 4 compat in `frontend/src/boot/auth.js`: `router.currentRoute.path` → `router.currentRoute.value.path` (was throwing on the 14-minute refresh-token interval)
+- Added named `backend-node-modules` and `frontend-node-modules` volumes to persist `node_modules` across container restarts
+
+### AI features (on `main` branch)
 
 #### AI settings — embedding configuration extension
-- Extended `ai.public` schema with `embeddingProvider` (default `openai`) and `embeddingModel` (default `text-embedding-3-small`)
+- Extended `ai.public` schema with `embeddingProvider` (default `openai`), `embeddingModel` (default `text-embedding-3-small`), and `embeddingMaxDistance` (default `0.8`)
 - Extended `ai.private` schema with `embeddingApiUrl`, `embeddingApiKey`, and `embeddingAzure: { deploymentName, apiVersion }`
 - Updated backend settings tests to include all new embedding defaults
 - Added "Embedding Configuration" section to frontend settings page with provider dropdown, model input, API URL/key, and conditional Azure fields
-- Added `embeddingDefaultUrl` computed property in `settings.js`
+- Added `embeddingDefaultUrl` computed property in `settings.js` showing correct `/v1` base URL placeholder per provider
+- Added `embeddingMaxDistance` slider (0.01–2.0) and Re-index All button to the embedding section in settings
 - Added embedding i18n keys to all 5 locale files
 
 #### ChromaDB vector store
-- Added ChromaDB `1.5.5` service to `docker-compose-dev.yml` with persistent named volume `chroma-data-dev`
-- Backend service linked to `chroma` container via `links` and `depends_on`
+- Added ChromaDB `1.5.5` service to `docker-compose-dev.yml` with persistent named volume `chroma-data-dev` mounted at `/data` (the actual data path used by ChromaDB)
 
 #### Backend AI service layer
 - New `backend/src/lib/ai-service.js`: unified `generate({ action, text, fieldName, context, aiSettings })` function
 - Provider routing via LangChain: OpenAI / OpenAI-compatible → `ChatOpenAI`; Azure → `AzureChatOpenAI`; Anthropic → `ChatAnthropic`; Ollama → `ChatOllama`
+- `ensureV1(url)` normalizes API base URLs by appending `/v1` if missing
 - Built-in default system and user prompt templates per action (`generate`, `complete`, `rewrite`) and field context
 - Template variable interpolation for `fieldName`, `findingTitle`, `similarVulnsBlock`
 - Strips markdown code fences from LLM responses before returning HTML
 
 #### Backend embedding service
 - New `backend/src/lib/embedding-service.js`: ChromaDB client-based vector store operations
-- `indexVulnerability(vuln, aiSettings)`: upserts one document per locale using OpenAI / Ollama / Azure embedding functions
+- `normalizeBaseUrl(url)`: strips trailing endpoint path segments (`/chat`, `/completions`, `/embeddings`) and ensures the URL ends with `/v1` — handles any format the user pastes from their LLM server's curl examples
+- Forces `encodingFormat: 'float'` on all non-OpenAI providers to work around `openai` SDK v6 defaulting to `base64` (local servers like LM Studio ignore the format and return plain floats, which the SDK then fails to decode, producing all-zero vectors)
+- `indexVulnerability(vuln, aiSettings)`: upserts one document per locale into ChromaDB using LangChain embeddings
 - `deleteVulnerability(vulnId, aiSettings)`: removes all embeddings for a vulnerability by ID
-- `searchSimilar(query, locale, aiSettings, topK)`: semantic nearest-neighbour search returning metadata (title, category, vulnType, score)
-- Silently skips all operations if ChromaDB is unreachable
+- `searchSimilar(query, locale, aiSettings, topK)`: strict locale-filtered semantic search; filters results by `embeddingMaxDistance` threshold; returns L2 distances (lower = more similar)
+- `reindexAll(aiSettings)`: re-indexes all vulnerabilities in MongoDB; logs per-item errors without aborting
 
 #### Backend AI API routes (`backend/src/routes/ai.js`)
 - `POST /api/ai/generate`: auth-protected (`audits:read`), validates AI enabled, runs RAG search then calls `ai-service.generate`, returns `{ html }`
 - `POST /api/ai/search-similar`: auth-protected (`vulnerabilities:read`), calls `embeddingService.searchSimilar`, then fetches full vulnerability data from MongoDB and returns enriched results (title, description, observation, remediation, references, cvssv3, cvssv4, distance) for use in the diff/review modal
 - `POST /api/ai/reindex-all`: auth-protected (`settings:update`), starts background re-indexing of all vulnerabilities; returns `{ started: true }` immediately
-- Route registered in `backend/src/app.js`; also removed a duplicate `vulnerability` route registration
+- Route registered in `backend/src/app.js`
+
+#### Startup ChromaDB sync
+- On backend startup, if `ai.enabled` and `ai.embeddingEnabled`, checks if the ChromaDB `vulnerabilities` collection is empty; if so, triggers `reindexAll` in background
+- If the collection already has entries, assumes it is sufficiently in sync (relying on CRUD hooks) and skips the re-index
+- Suppresses ChromaDB's noisy `"No embedding function configuration found"` messages at the `process.stderr` level (they are expected since embeddings are computed externally via LangChain)
 
 #### Vulnerability CRUD embedding hooks
 - `backend/src/routes/vulnerability.js`: fire-and-forget `indexVulnAsync` called after create and update; `deleteVulnAsync` called after delete
-- Embedding calls are guarded by `settings.ai.enabled` check; errors logged but never block the HTTP response
+- Embedding calls are guarded by `settings.ai.enabled` and `settings.ai.embeddingEnabled` checks; errors logged but never block the HTTP response
 
 #### Frontend AI service
-- New `frontend/src/services/ai.js`: `generate(payload)` and `searchSimilar(query, locale)` wrapping the new backend endpoints
+- New `frontend/src/services/ai.js`: `generate(payload)`, `searchSimilar(query, locale)`, and `reindexAll()` wrapping the backend endpoints
 
 #### TipTap AI assistant extension
 - New `frontend/src/components/ai-assistant.js`: custom TipTap `Extension` with commands `aiGenerate`, `aiComplete`, `aiRewrite`
@@ -154,38 +171,43 @@ The core objective is to modernize the application and integrate AI features to 
 - `frontend/src/pages/audits/edit/findings/edit/edit.html`: added `fieldName` and `:aiContext` props to all four `basic-editor` instances (description, observation, poc, remediation) passing the finding title and audit language as context
 
 #### i18n
-- Added AI action keys (`aiGenerate`, `aiComplete`, `aiRewrite`, `aiGenerating`, `aiError`, tooltips) and embedding configuration keys (10 keys) to all 5 locale files (en-US, fr-FR, de-DE, zh-CN, es-ES)
+- Added AI action keys (`aiGenerate`, `aiComplete`, `aiRewrite`, `aiGenerating`, `aiError`, tooltips) and embedding configuration keys to all 5 locale files (en-US, fr-FR, de-DE, zh-CN, es-ES)
+- Added es-ES locale file and registered it in `frontend/src/i18n/index.js` and `language-selector.vue`
 
 ### Search Similar Vulnerabilities feature (on `main` branch)
 
 #### Backend
-- Updated `POST /api/ai/search-similar` to return full vulnerability data (description, observation, remediation, references, cvssv3, cvssv4) in addition to metadata, enabling the diff view in the frontend modal
-- Backend search uses strict locale filtering: only returns results in the exact locale of the audit
+- `POST /api/ai/search-similar` fetches and returns full vulnerability data from MongoDB (description, observation, remediation, references, cvssv3, cvssv4) alongside L2 distance metadata, enabling the diff view in the frontend modal
+- Strict locale filtering: only returns results matching the exact locale of the audit
 
-#### Settings: `embeddingMaxDistance` (already in model, now exposed in UI)
-- Added `embeddingMaxDistance` slider to the Embedding Configuration section in the frontend settings page (range 0.01–2.0, step 0.01)
-- Added `reindexAll` method and button to settings page: fires `POST /api/ai/reindex-all` and shows feedback; guarded by `canEdit && ai.enabled && ai.embeddingEnabled`
-- Added `reindexing` and `reindexStarted` data flags to `settings.js`
-- Updated default data in `settings.js` and `getSettings` merge to include `embeddingMaxDistance: 0.8`
-- Added `AiService` import to `settings.js`
+#### Settings: `embeddingMaxDistance`
+- Slider (range 0.01–2.0, step 0.01) in the Embedding Configuration section controls the L2 distance cutoff; results above this value are filtered out before being returned to the frontend
+- Re-index All button fires `POST /api/ai/reindex-all` with loading state and success feedback
 
 #### Frontend: SimilarVulnModal (`frontend/src/components/similar-vuln-modal.vue`)
-- New component: full-screen dialog with two-panel layout
-  - Left panel: scrollable results list with distance badge color-coded (green < 0.4, orange < 0.8, red ≥ 0.8) showing high/medium/low match labels
-  - Right panel: side-by-side diff for each field (description, observation, remediation, references, cvssv3, cvssv4) comparing current finding vs proposed values
-  - "Apply" button emits `apply` event with selected result; parent applies fields and notifies user to save manually
-- Props: `results`, `loading`, `error`, `currentFinding`; emits `apply`
+- New full-screen dialog component with two-panel layout
+  - Left panel: scrollable results list with L2 distance badge color-coded by threshold (green < 0.4 high match, orange < 0.8 medium, red ≥ 0.8 low)
+  - Right panel: side-by-side field diff (description, observation, remediation, references, cvssv3, cvssv4) comparing current finding vs proposed values; each field shows a "changed" badge when values differ
+  - Apply button overwrites finding fields and closes modal; user saves manually as usual
+- Auto-selects first result on open; `fieldHasChange()` drives diff badge display
 
 #### Frontend: Finding edit page wiring (`frontend/src/pages/audits/edit/findings/edit/`)
 - Added `SimilarVulnModal` and `AiService` imports to `edit.js`
 - Added `similarVulnModalOpen`, `similarVulnResults`, `similarVulnLoading`, `similarVulnError` data properties
-- Added `searchSimilarVulns()` method: builds query from finding title + stripped description (capped 500 chars), calls `AiService.searchSimilar`, opens modal
-- Added `applySimilarVuln(result)` method: overwrites description, observation, remediation, references, cvssv3, cvssv4 from the selected result and marks `needSave = true`
-- Added "Search Similar" button in breadcrumb toolbar (visible when `ai.enabled && ai.embeddingEnabled`)
-- Added `<similar-vuln-modal>` component to `edit.html` template
+- `searchSimilarVulns()`: builds query from finding title + stripped description (capped 500 chars), calls `AiService.searchSimilar` with audit locale, opens modal; requires title to be set (shows warning otherwise)
+- `applySimilarVuln(result)`: overwrites description, observation, remediation, references, cvssv3, cvssv4 from selected result, syncs editors, marks `needSave = true`, and shows a save-reminder notification
+- Search Similar button in breadcrumb toolbar, visible only when `ai.enabled && ai.embeddingEnabled`
+- `<similar-vuln-modal>` mounted in `edit.html` template
 
 #### i18n
-- Added 25 new keys per locale (similarVuln*, aiEmbeddingMaxDistance*, aiReindex*, empty, similarVulnCvss4) to all 5 locale files
+- Added `similarVuln*`, `aiEmbeddingMaxDistance*`, `aiReindex*`, `empty`, `similarVulnCvss4` keys (25 keys per locale) to all 5 locale files
+
+### UI modernization and rebranding (on `new-ui` branch)
+- Rebranded frontend package name and product name from `pwndoc-ng` to `autodoc` in `package.json`
+- Replaced pwndoc logo assets with autodoc logos; updated login page and home layout to use new branding; added `logo/` source assets directory
+- Audit edit page: made left drawer collapsible — `drawerOpen` state with toggle chevron buttons; responsive breakpoint at 1024px
+- Breadcrumb component: removed redundant home icon button; tightened layout (`min-height`, padding, `flex-wrap`, `gap`) for better wrapping on narrow screens with many toolbar buttons
+- `quasar.conf.js`: expanded HMR `webSocketURL` to object form with explanatory comment about the nginx proxy path
 
 ## TODO
 - [x] Merge PR #516 (Some Fixes)
