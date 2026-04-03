@@ -18,10 +18,11 @@ The core objective is to modernize the application and integrate AI features to 
 - **Restart affected containers**: After each change, the agent will restart the affected containers to ensure changes are applied and to check for any runtime issues.
 
 ## Branch Policy
-- **`master`**: Stable base with merged upstream PRs and critical fixes.
+- **`master`**: The main branch. Default remote branch (`origin/HEAD -> origin/master`). Stable base with merged upstream PRs and critical fixes. All significant work is developed on feature branches and merged here. Do NOT use or publish a branch named `main` — the canonical default is `master`.
 - **`update-dependencies`**: Dependency upgrades and related breaking-change fixes. New features that depend on the upgraded stack also live here until merged.
 - **`new-ui`**: Purely visual/UI changes (theming, layout, styling, dark mode polish). No new features (e.g. AI settings, new API endpoints) should be committed to this branch.
 - **`ai-features`**: AI infrastructure and feature implementation (not yet active).
+- **Local `main` branch**: Used as the active working branch during development (equivalent to a working copy of `master`). Never push it to remote — push to `master` instead.
 
 ## Changes Log
 
