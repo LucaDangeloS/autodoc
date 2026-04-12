@@ -209,6 +209,64 @@ The core objective is to modernize the application and integrate AI features to 
 - Breadcrumb component: removed redundant home icon button; tightened layout (`min-height`, padding, `flex-wrap`, `gap`) for better wrapping on narrow screens with many toolbar buttons
 - `quasar.conf.js`: expanded HMR `webSocketURL` to object form with explanatory comment about the nginx proxy path
 
+### Proof-based similarity search (on `main` branch)
+
+#### Overview
+New workflow: user fills the Proofs tab with screenshots/text → clicks "Search from Proofs" → vision model analyzes images → embedding model finds similar vulnerabilities → gen model fills the proof narrative with images interleaved.
+
+#### Backend settings model
+- Added `visionEnabled` (Boolean, default `false`) and `visionPublic: { visionProvider, visionModel }` to the `ai` section
+- Added to `ai.private`: `visionApiUrl`, `visionApiKey`, `visionAzure: { deploymentName, apiVersion }`, `visionSystemPrompt`, `visionAnonymizeLlm` (Boolean), `visionAnonymizeRegex` (Boolean)
+- Updated `getPublic()` projection to include `ai.visionEnabled ai.visionPublic`
+- Updated `backend/tests/settings.test.js` with all new vision field defaults (tests fail due to pre-existing MongoDB connectivity issue in the test container, unrelated to this change)
+
+#### Backend vision service (`backend/src/lib/vision-service.js`)
+- New file: multimodal LLM proof analysis pipeline
+- `parseProofHtml(pocHtml)`: extracts text segments and `<img src="/api/images/:id">` tags with index and markdown refs
+- `fetchImageBase64(imageId)`: retrieves base64 image data from the Image model
+- `buildVisionModel(aiSettings)`: same provider switch pattern as ai-service.js, using `visionPublic`/`visionPrivate` config
+- `anonymizeWithRegex(text)`: regex replacement for IPv4/IPv6, email, domain, and common hostname patterns
+- `analyzeProofs(pocHtml, aiSettings)`: full pipeline — parse HTML, fetch all images in parallel, build LangChain multimodal `HumanMessage` with `image_url` content blocks, call vision LLM, optionally apply LLM and/or regex anonymization, return `{ visionSummary, imageDescriptions }`
+- Default system prompt instructs the model to act as a cybersecurity analyst; `visionAnonymizeLlm` appends an anonymization instruction to the system prompt
+- Per-image description extraction from LLM output via regex pattern matching
+
+#### Backend ai-service.js extension
+- Added `fill-proofs` to `DEFAULT_SYSTEM_PROMPTS`: instructs the model to produce HTML that interleaves the provided `<img>` tags at natural positions in the narrative
+- Added `fill-proofs` to `DEFAULT_USER_PROMPTS`: template with `{findingTitle}`, `{vulnDescription}`, `{visionSummary}`, `{imageRefsBlock}` variables
+- Added `buildImageRefsBlock(imageDescriptions)`: formats image descriptions + `<img>` tags for the user prompt
+- Updated `generate()` to extract `visionSummary`, `vulnDescription`, `imageDescriptions` from context and use fill-proofs-specific system/user prompts (bypasses custom prompts for this action)
+
+#### Backend AI route extensions (`backend/src/routes/ai.js`)
+- `POST /api/ai/generate`: now accepts `fill-proofs` as a valid action
+- New `POST /api/ai/analyze-proofs`: auth-protected (`audits:read`), validates `ai.enabled` and `ai.visionEnabled`, calls `visionService.analyzeProofs`, then runs `embeddingService.searchSimilar` with the vision summary, enriches results from MongoDB (same as `search-similar`), returns `{ visionSummary, imageDescriptions, similarResults }`
+
+#### Frontend AI service (`frontend/src/services/ai.js`)
+- Added `analyzeProofs(pocHtml, locale)` wrapping `POST ai/analyze-proofs`
+
+#### Frontend settings page
+- New "Vision / Proof Analysis" section in the AI settings card (between Embedding and Generation Parameters sections)
+- Vision provider select, model input with hint ("must be vision-capable"), API URL/key with visibility toggle, conditional Azure fields, anonymization sub-section with two independent toggles (LLM and Regex), vision system prompt textarea (shown when vision enabled)
+- Added `showVisionApiKey` data property, `visionDefaultUrl` computed property mapping provider to default URL
+- All vision fields included in the settings state defaults and `getSettings()` merge
+
+#### SimilarVulnModal extension (`frontend/src/components/similar-vuln-modal.vue`)
+- New props: `isProofMode` (Boolean), `visionSummary` (String), `generatedPoc` (String), `pocLoading` (Boolean)
+- New emit: `select` — fired when user clicks a result item (used by parent to trigger proof generation)
+- Dynamic title bar: shows "Search Similar from Proof of Concept" in proof mode
+- Right panel additions (proof mode only): collapsible "AI Proof Analysis" expansion item showing `visionSummary`; "Generated Proof of Concept" preview section with loading spinner and proposed-style HTML preview box
+- `applySelected()`: if in proof mode and `generatedPoc` is set, merges `poc` into the apply payload
+
+#### Finding edit page wiring
+- `edit.js`: new data properties `similarVulnIsProofMode`, `proofVisionSummary`, `proofImageDescriptions`, `proofGeneratedPoc`, `proofPocLoading`
+- `searchSimilarVulns()` now resets proof mode state and sets `similarVulnIsProofMode = false` before opening
+- New method `searchSimilarFromProofs()`: validates poc has content, calls `AiService.analyzeProofs`, stores vision summary/image descriptions/results, opens modal in proof mode
+- New method `onProofResultSelected(result)`: triggered by `@select` event from modal; calls `AiService.generate` with `fill-proofs` action, passing `vulnDescription`, `visionSummary`, and `imageDescriptions` as context; updates `proofGeneratedPoc`
+- `applySimilarVuln()`: now also applies `result.poc` if present (set by modal in proof mode)
+- `edit.html`: "Search from Proofs" button in the Proofs tab card header (`image_search` icon, secondary color, visible only when `ai.enabled && ai.visionEnabled`); `<similar-vuln-modal>` updated with all new props and `@select` event handler
+
+#### i18n
+- Added 30 new keys per locale (vision section + proof workflow labels) to all 5 locale files (en-US, fr-FR, de-DE, zh-CN, es-ES): `aiVisionSection`, `aiVisionDescription`, `aiVisionProvider`, `aiVisionModel`, `aiVisionModelHint`, `aiVisionApiUrl`, `aiVisionApiUrlHint`, `aiVisionApiKey`, `aiVisionApiKeyHint`, `aiVisionAzureSettings`, `aiVisionAnonymization`, `aiVisionAnonymizationDescription`, `aiVisionAnonymizeLlm`, `aiVisionAnonymizeLlmHint`, `aiVisionAnonymizeRegex`, `aiVisionAnonymizeRegexHint`, `aiVisionSystemPrompt`, `aiVisionSystemPromptHint`, `searchSimilarFromProofs`, `proofSearchTitle`, `proofSearchNeedContent`, `proofAnalysis`, `proofAnalysisSummary`, `proofAnalysisLoading`, `proofFillLoading`, `proofGeneratedPreview`, `proofGeneratedEmpty`
+
 ## TODO
 - [x] Merge PR #516 (Some Fixes)
 - [x] Merge PR #524 (Hide Delete buttons)
@@ -217,4 +275,5 @@ The core objective is to modernize the application and integrate AI features to 
 - [x] Implement AI-assisted editor features in findings (generate, complete, rewrite)
 - [x] Implement connector from vulnerability database to vector database for AI information retrieval
 - [x] Implement "Search Similar" vulnerability feature with diff modal, locale filtering, and Re-index All button
+- [x] Implement proof-based similarity search: vision model analyzes POC screenshots → embedding search → gen model fills proof narrative with images
 - [ ] Auto-translate vulnerabilities to all configured locales on create/update
