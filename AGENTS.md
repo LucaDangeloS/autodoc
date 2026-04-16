@@ -294,6 +294,51 @@ Note: the backend authenticates via cookie (`token=JWT <token>`), not a Bearer h
 
 The fixture file `backend/tests/fixtures/test-vulnerabilities.json` contains the canonical set of test vulnerabilities (SQL Injection, XSS, IDOR, SSRF, Broken Authentication, Path Traversal, Command Injection, Insecure Deserialization, Security Misconfiguration, Sensitive Data Exposure).
 
+### Retest feature (on `master` branch)
+
+#### Overview
+Audits can now be marked as retests. When enabled, every finding gains a dedicated "Retest Evidence" tab mirroring the Proofs tab, plus a Pass/Fail toggle for the retest outcome.
+
+#### Backend model changes
+- `backend/src/models/audit.js`: added `isRetest: { type: Boolean, default: false }` to `AuditSchema`
+- `backend/src/models/audit.js`: added `retestEvidence: String` and `retestPassed: { type: Boolean, default: null }` to the `Finding` subdocument
+
+#### Backend route changes (`backend/src/routes/audit.js`)
+- `PUT /api/audits/:auditId` (general update): accepts `isRetest` boolean
+- `POST /api/audits/:auditId/findings` (create): accepts `retestEvidence`, `retestPassed`
+- `PUT /api/audits/:auditId/findings/:findingId` (update): accepts `retestEvidence` (via `_.isNil`), `retestPassed`
+
+#### Report template variables
+All variables below are accessible inside `{#findings}...{/findings}` loops in docx templates:
+
+| Template variable | Type | Description |
+|---|---|---|
+| `finding.retest_evidence` | HTML paragraphs object | Retest evidence content; use with `\| convertHTML` filter |
+| `finding.retest_passed` | Boolean / null | `true` = passed, `false` = failed, `null` = not set |
+| `audit.is_retest` | Boolean | `true` if the audit is marked as a retest |
+
+Example usage in a docx template:
+```
+{#findings}
+  {#is_retest}
+  Retest result: {#retest_passed}PASSED{/retest_passed}{^retest_passed}FAILED{/retest_passed}
+  {retest_evidence | convertHTML}
+  {/is_retest}
+{/findings}
+```
+
+#### Frontend changes
+- `frontend/src/pages/audits/edit/general/general.html`: added `isRetest` toggle with hint text in the audit general settings card
+- `frontend/src/pages/audits/edit/general/general.js`: `isRetest: false` added to audit data defaults
+- `frontend/src/pages/audits/edit/findings/edit/edit.html`: new "Retest Evidence" tab (shown only when `localAudit.isRetest` is true); contains a Pass/Fail `q-btn-toggle` with clear button, and a `basic-editor` for rich-text evidence; both fields carry `<template-hint>` tooltip bubbles showing their template variable names
+- `frontend/src/pages/audits/edit/findings/edit/edit.js`: `retestEvidence` and `retestPassed` added to finding data defaults; retest tab initialized in `updateOrig`; `TemplateHint` imported and registered
+
+#### TemplateHint component (`frontend/src/components/template-hint.vue`)
+A small `(?)` icon button that appears inline next to field labels. On hover it shows a tooltip with the exact Jinja2/docxtemplater variable name to use in the report template. Currently wired to `retestEvidence` and `retestPassed` fields as a pilot. **Intended to be extended to all finding and audit fields** in a future pass for complete inline template documentation (tracked in TODO).
+
+#### i18n
+Added 10 keys per locale to all 5 locale files (en-US, fr-FR, de-DE, zh-CN, es-ES): `isRetest`, `isRetestHint`, `retestEvidence`, `retestEvidenceContent`, `retestResult`, `retestPassed`, `retestFailed`, `retestClearResult`, `templateHintLabel`
+
 ## TODO
 - [x] Merge PR #516 (Some Fixes)
 - [x] Merge PR #524 (Hide Delete buttons)
@@ -303,4 +348,6 @@ The fixture file `backend/tests/fixtures/test-vulnerabilities.json` contains the
 - [x] Implement connector from vulnerability database to vector database for AI information retrieval
 - [x] Implement "Search Similar" vulnerability feature with diff modal, locale filtering, and Re-index All button
 - [x] Implement proof-based similarity search: vision model analyzes POC screenshots → embedding search → gen model fills proof narrative with images
+- [x] Implement Retest feature: isRetest audit flag, retestEvidence + retestPassed per finding, report template variables, TemplateHint component
 - [ ] Auto-translate vulnerabilities to all configured locales on create/update
+- [ ] Extend TemplateHint to all finding and audit fields for full inline template documentation
