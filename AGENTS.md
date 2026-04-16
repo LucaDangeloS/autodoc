@@ -288,7 +288,7 @@ TOKEN=$(curl -sk -X POST https://localhost:8443/api/users/token \
 curl -sk -X POST https://localhost:8443/api/data/languages \
   -H "Content-Type: application/json" \
   -H "Cookie: token=JWT $TOKEN" \
-  -d '{"language":"English","locale":"en-US"}'
+  -d '{"language":"English","locale":"en-GB"}'
 
 curl -sk -X POST https://localhost:8443/api/data/languages \
   -H "Content-Type: application/json" \
@@ -304,7 +304,7 @@ curl -sk -X POST https://localhost:8443/api/vulnerabilities \
 
 Note: the backend authenticates via cookie (`token=JWT <token>`), not a Bearer header.
 
-**Languages must be added before vulnerabilities.** The vulnerability schema stores a `locale` per detail entry, and the app validates that the referenced locale exists. The two canonical test locales are `en-US` (English) and `es-ES` (Spanish).
+**Languages must be added before vulnerabilities.** The vulnerability schema stores a `locale` per detail entry, and the app validates that the referenced locale exists. The two canonical test locales are `en-GB` (English) and `es-ES` (Spanish).
 
 The fixture file `backend/tests/fixtures/test-vulnerabilities.json` contains the canonical set of test vulnerabilities (SQL Injection, XSS, IDOR, SSRF, Broken Authentication, Path Traversal, Command Injection, Insecure Deserialization, Security Misconfiguration, Sensitive Data Exposure).
 
