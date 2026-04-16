@@ -267,6 +267,33 @@ New workflow: user fills the Proofs tab with screenshots/text → clicks "Search
 #### i18n
 - Added 30 new keys per locale (vision section + proof workflow labels) to all 5 locale files (en-US, fr-FR, de-DE, zh-CN, es-ES): `aiVisionSection`, `aiVisionDescription`, `aiVisionProvider`, `aiVisionModel`, `aiVisionModelHint`, `aiVisionApiUrl`, `aiVisionApiUrlHint`, `aiVisionApiKey`, `aiVisionApiKeyHint`, `aiVisionAzureSettings`, `aiVisionAnonymization`, `aiVisionAnonymizationDescription`, `aiVisionAnonymizeLlm`, `aiVisionAnonymizeLlmHint`, `aiVisionAnonymizeRegex`, `aiVisionAnonymizeRegexHint`, `aiVisionSystemPrompt`, `aiVisionSystemPromptHint`, `searchSimilarFromProofs`, `proofSearchTitle`, `proofSearchNeedContent`, `proofAnalysis`, `proofAnalysisSummary`, `proofAnalysisLoading`, `proofFillLoading`, `proofGeneratedPreview`, `proofGeneratedEmpty`
 
+## Dev Environment Reference
+
+### Default credentials
+- **Username**: `admin`
+- **Password**: `Admin1admin2`
+
+### Test data on fresh install
+After a full restart with data destruction (e.g. `docker compose down -v`), the MongoDB volume is wiped and must be repopulated. Upon first boot:
+1. The admin user is pre-seeded automatically (credentials above).
+2. Test vulnerabilities must be re-created manually or via the API. Use the script below or the UI at `https://localhost:8443`.
+
+To seed test vulnerabilities via the API (requires a valid JWT — log in first):
+```bash
+TOKEN=$(curl -sk -X POST https://localhost:8443/api/users/token \
+  -H "Content-Type: application/json" \
+  -d '{"username":"admin","password":"Admin1admin2"}' | jq -r '.datas.token')
+
+curl -sk -X POST https://localhost:8443/api/vulnerabilities \
+  -H "Content-Type: application/json" \
+  -H "Cookie: token=JWT $TOKEN" \
+  -d @backend/tests/fixtures/test-vulnerabilities.json
+```
+
+Note: the backend authenticates via cookie (`token=JWT <token>`), not a Bearer header.
+
+The fixture file `backend/tests/fixtures/test-vulnerabilities.json` contains the canonical set of test vulnerabilities (SQL Injection, XSS, IDOR, SSRF, Broken Authentication, Path Traversal, Command Injection, Insecure Deserialization, Security Misconfiguration, Sensitive Data Exposure).
+
 ## TODO
 - [x] Merge PR #516 (Some Fixes)
 - [x] Merge PR #524 (Hide Delete buttons)
