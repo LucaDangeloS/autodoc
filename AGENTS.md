@@ -15,7 +15,11 @@ The core objective is to modernize the application and integrate AI features to 
   - For manual testing (e.g., frontend visual checks), the agent will provide the user with the link and instructions to test it.
 - Minimize comments in the codebase to maintain readability and focus on functionality.
 - **Documentation**: Everything implemented in the codebase must be documented in this file under the Changes Log section. No exceptions.
-- **Restart affected containers**: After each change, the agent will restart the affected containers to ensure changes are applied and to check for any runtime issues.
+- **Restart affected containers**: After each change, the agent **must** restart the affected containers to ensure changes are applied and to check for any runtime issues. Rules:
+  - **Backend changes** (`backend/src/**`): restart `pwndoc-ng-backend` → `docker compose -f docker-compose-dev.yml restart backend`
+  - **Frontend changes** (`frontend/src/**`, `frontend/quasar.conf.js`): the webpack dev server (HMR) picks up changes automatically; restart `autodoc-frontend-app-1` only if the change affects the build config or a new boot file is added → `docker compose -f docker-compose-dev.yml restart frontend-app`
+  - **Docker Compose / infra changes** (`docker-compose-dev.yml`, `Dockerfile.dev`): restart all services → `docker compose -f docker-compose-dev.yml up -d`
+  - After restarting, always check logs to confirm no runtime errors before reporting success.
 
 ## Branch Policy
 - **`master`**: The main branch. Default remote branch (`origin/HEAD -> origin/master`). Stable base with merged upstream PRs and critical fixes. All significant work is developed on feature branches and merged here. Do NOT use or publish a branch named `main` — the canonical default is `master`.
