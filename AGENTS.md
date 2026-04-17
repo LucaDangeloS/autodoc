@@ -353,6 +353,37 @@ A small `(?)` icon button that appears inline next to field labels. On hover it 
 #### i18n
 Added 10 keys per locale to all 5 locale files (en-US, fr-FR, de-DE, zh-CN, es-ES): `isRetest`, `isRetestHint`, `retestEvidence`, `retestEvidenceContent`, `retestResult`, `retestPassed`, `retestFailed`, `retestClearResult`, `templateHintLabel`
 
+### Finding data-loss fix and dirty-tracking overhaul (on `master` branch)
+
+#### Problem
+Three root causes were identified that could result in lost finding data:
+1. **Race condition**: navigating to another finding before `getFinding()` resolved would pass the unsaved-changes guard (because `needSave` was `false` and `finding` was still the blank default), potentially triggering a save of empty content.
+2. **Incomplete dirty tracking**: changes to `title`, `vulnType`, `status`, `priority`, `remediationComplexity`, `references`, `cvssv3`, `cvssv4` never set `needSave` — only editor text fields did, and only after `readyToSave` was true. Conversely, TipTap editor initialisation noise could falsely set `needSave` on page load.
+3. **Editor `beforeUnmount` infinite loop**: `editor.vue` had a `while(1)` loop waiting for the WebSocket to connect before destroying the editor. If the connection never arrived, navigation was blocked forever.
+
+#### Changes (`frontend/src/pages/audits/edit/findings/edit/edit.js`)
+- **Parallel data fetching**: `getCustomFields()` and `getFinding()` now run simultaneously via `Promise.all`; `initCustomFieldsForFinding()` only runs after both resolve. Eliminates the sequential latency on finding load.
+- **`loading` flag**: set `true` on mount, cleared only after both fetches resolve and `findingOrig` is snapshotted. Blocks navigation while data is in flight.
+- **Structural dirty check via `_.isEqual`**: replaced the fragile `needSave` boolean (which missed non-editor fields) with a deep `watch` on `finding` that calls `this.$_.isEqual(finding, findingOrig)`. The watcher activates only after `findingOrig` is set (post-load), so initialisation noise cannot trigger a false positive.
+- **`unsavedChanges()` also flushes editors**: before comparing, `syncEditors` is called to flush TipTap HTML into `this.finding`, ensuring editor content is included in the diff.
+- **Navigation blocked during load**: `beforeRouteLeave` and `beforeRouteUpdate` call `next(false)` if `loading` is true, showing a brief notification instead of allowing navigation to an empty state.
+- **`syncEditors` guarded**: only called in route guards when `loading` is `false`, avoiding flushing empty strings from uninitialised editors.
+- **`findingOrig` null-safe**: `updateOrig()` (tab-switch baseline sync) checks `findingOrig !== null` before writing to it, and re-triggers the `needSave` check afterwards.
+
+#### Changes (`frontend/src/pages/audits/edit/findings/edit/edit.html`)
+- All non-editor inputs (`title`, `vulnType`, `status` toggle, `priority`, `remediationComplexity`, `references`, `cvssv3/4`, `retestPassed`) now have `:disable="loading"` or `:readonly="loading || ..."`.
+- All `basic-editor` instances now have `:editable="!loading && frontEndAuditState === AUDIT_VIEW_STATE.EDIT"`.
+- Removed all `v-on:editorchange="readyToSave ? needSave = true : null"` inline handlers — the `finding` watcher covers these.
+- Removed `@update:model-value="needSave = true"` from `retestPassed` toggle — watcher covers it.
+- Added `<q-inner-loading :showing="loading">` spinner overlays on all cards.
+- Save and action buttons disabled during loading.
+
+#### Changes (`frontend/src/components/editor.vue`)
+- Fixed `beforeUnmount` infinite loop: the `while(1)` that waited for WebSocket connection now has a 3-second deadline, after which it proceeds regardless.
+
+#### i18n
+- Added `findingLoading` key to all 5 locale files for the navigation-blocked notification.
+
 ## TODO
 - [x] Merge PR #516 (Some Fixes)
 - [x] Merge PR #524 (Hide Delete buttons)
