@@ -225,6 +225,13 @@ The custom component gained a `section` prop (`'vulnerabilities'`, `'audits'`, `
 ### Settings nav label casing fix
 - `frontend/src/pages/settings/settings.html`: changed nav item label class from `text-caption` to `text-body2` to restore correct capitalisation
 
+### TemplateHint extended to all finding and audit fields
+- `frontend/src/pages/audits/edit/findings/edit/edit.html`: `<template-hint>` added inline next to every field label across all tabs (title, type, description, observation, references, proofs/poc, affected assets, CVSS score, remediation complexity, priority, remediation, retest result, retest evidence)
+- `frontend/src/pages/audits/edit/general/general.html`: `<template-hint>` added next to every audit field (name, language, company, client, reviewers, collaborators, isRetest toggle, start date, end date, reporting date, scope)
+- `frontend/src/pages/audits/edit/general/general.js`: imported and registered `TemplateHint` component
+- Fields using `q-input`/`q-select` use `label-slot` with the hint inside `<template #label>`; standalone labels use a `row items-center` wrapper with the hint beside the text
+- Template variable strings shown match the exact docxtemplater syntax used in report templates (e.g. `finding.description | convertHTML`, `{#audit.collaborators}.firstname .lastname{/audit.collaborators}`)
+
 ---
 
 ## TODO
@@ -236,6 +243,6 @@ The custom component gained a `section` prop (`'vulnerabilities'`, `'audits'`, `
 - [x] Implement Retest feature with report template variables and TemplateHint component
 - [x] Fix finding data-loss race condition and dirty-tracking
 - [x] Reorganise Data section navigation
-- [ ] Extend TemplateHint to all finding and audit fields for full inline template documentation
+- [x] Extend TemplateHint to all finding and audit fields for full inline template documentation
 - [ ] Auto-translate vulnerabilities to all configured locales on create/update
 - [ ] Checklists feature (design TBD)
