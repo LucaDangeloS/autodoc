@@ -232,6 +232,47 @@ The custom component gained a `section` prop (`'vulnerabilities'`, `'audits'`, `
 - Fields using `q-input`/`q-select` use `label-slot` with the hint inside `<template #label>`; standalone labels use a `row items-center` wrapper with the hint beside the text
 - Template variable strings shown match the exact docxtemplater syntax used in report templates (e.g. `finding.description | convertHTML`, `{#audit.collaborators}.firstname .lastname{/audit.collaborators}`)
 
+### Database migration system
+
+#### Overview
+A migration system allows upgrading from an existing `pwndoc-ng` instance without data loss. Set the `MIGRATE_FROM` environment variable in `docker-compose-dev.yml` to a MongoDB URI pointing at the source database. On the next backend startup, all pending migration steps are applied and recorded. Re-runs only apply new steps — the process is fully idempotent.
+
+#### How to trigger a migration
+Edit `docker-compose-dev.yml`, set the `MIGRATE_FROM` variable on the `backend` service, then restart:
+```yaml
+environment:
+  - MIGRATE_FROM=mongodb://192.168.1.10:27017/pwndoc
+```
+```bash
+docker compose -f docker-compose-dev.yml up -d
+docker compose -f docker-compose-dev.yml logs -f backend
+```
+Leave `MIGRATE_FROM=` (empty) or remove the variable entirely to skip migration on future restarts.
+
+#### Implementation
+- `backend/src/lib/migration.js`: migration runner and step definitions
+- `backend/src/app.js`: calls `runMigration()` at startup after all models are registered; errors are logged but never crash the server
+- `docker-compose-dev.yml`: `MIGRATE_FROM` env var on the `backend` service (blank by default)
+- Applied steps are tracked in the `_migrations` collection of the destination database
+
+#### Migration steps
+
+| Step | Name | Description |
+|---|---|---|
+| 1 | `copy-base-collections` | Copies users, clients, companies, templates, languages, audit-types, vulnerability-types, vulnerability-categories, custom-sections, custom-fields, images verbatim from the source DB |
+| 2 | `copy-vulnerabilities` | Copies the full vulnerabilities collection |
+| 3 | `copy-audits` | Copies the full audits collection |
+| 4 | `add-isRetest-to-audits` | Sets `isRetest: false` on all copied audits that lack the field (added by this project) |
+| 5 | `add-retest-fields-to-findings` | Sets `retestEvidence: ''` and `retestPassed: null` on all finding subdocuments that lack these fields (added by this project) |
+| 6 | `add-cvssv4-to-vulnerabilities` | Sets `cvssv4: ''` on all vulnerability documents that lack the field (added by this project) |
+| 7 | `add-cvssv4-to-findings` | Sets `cvssv4: ''` on all finding subdocuments that lack the field (added by this project) |
+
+#### Adding a new migration step
+When a schema change is made to any model, a new step must be added:
+1. Open `backend/src/lib/migration.js` and append a new object to the `STEPS` array with a unique `id`, a descriptive `name`, and an `async run(srcDb, dstDb)` function.
+2. Document the new step in this table above.
+3. The step will only run on instances that have not yet applied it (tracked by `id` in `_migrations`).
+
 ---
 
 ## TODO
