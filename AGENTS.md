@@ -226,13 +226,28 @@ The custom component gained a `section` prop (`'vulnerabilities'`, `'audits'`, `
 - `frontend/src/pages/settings/settings.html`: changed nav item label class from `text-caption` to `text-body2` to restore correct capitalisation
 
 ### TemplateHint extended to all finding and audit fields
-- `frontend/src/pages/audits/edit/findings/edit/edit.html`: `<template-hint>` added inline next to every field label across all tabs (title, type, description, observation, references, proofs/poc, affected assets, CVSS score, remediation complexity, priority, remediation, retest result, retest evidence)
+- `frontend/src/pages/audits/edit/findings/edit/edit.html`: `<template-hint>` added next to every field label across all tabs (title, type, description, observation, references, proofs/poc, affected assets, CVSS score, remediation complexity, priority, remediation, retest result, retest evidence)
 - `frontend/src/pages/audits/edit/general/general.html`: `<template-hint>` added next to every audit field (name, language, company, client, reviewers, collaborators, isRetest toggle, start date, end date, reporting date, scope)
 - `frontend/src/pages/audits/edit/general/general.js`: imported and registered `TemplateHint` component
-- Fields using `q-input`/`q-select` use `label-slot` with the hint inside `<template #label>`; standalone labels use a `row items-center` wrapper with the hint beside the text
-- Template variable strings shown match the exact docxtemplater syntax used in report templates (e.g. `finding.description | convertHTML`, `{#audit.collaborators}.firstname .lastname{/audit.collaborators}`)
+- `q-input`/`q-select` fields use the `#append` slot so the hint icon sits in the right-hand inner edge of the field — always visible and hoverable regardless of label float state; standalone labels (`description`, `scope`, etc.) use a `row items-center` wrapper
+- Template variable strings match the exact docxtemplater syntax (e.g. `finding.description | convertHTML`, `{#audit.collaborators}.firstname .lastname{/audit.collaborators}`)
 
-### Database migration system
+### Auto-translate vulnerabilities
+
+#### Overview
+When AI is enabled and `ai.translateLocales` contains one or more locale codes, creating or updating a vulnerability automatically generates translated `details` entries for every configured locale that is not already present. Translation is performed field-by-field via the same LLM used for generation, preserving all HTML tags.
+
+#### Backend service (`backend/src/lib/translate-service.js`)
+- `translateVulnerability(vuln, aiSettings)`: called after a vulnerability is **created**. Adds a new `details` entry for each locale in `aiSettings.translateLocales` that does not yet exist on the document.
+- `translateVulnerabilityUpdate(vuln, aiSettings)`: called after a vulnerability is **updated**. Updates existing locale entries or adds new ones, always overwriting with a fresh translation of the source content.
+- Both functions identify the source locale from the first `details` entry that has a non-empty `title`, build a LangChain chat model using the generation provider settings, and translate `title`, `vulnType`, `description`, `observation`, and `remediation` field by field. `references` and `customFields` are copied as-is (no translation needed).
+- `translateField(chatModel, html, fieldName, fromLocale, toLocale)`: translates a single HTML field. System prompt instructs the model to preserve all HTML tags and not translate code snippets, commands, URLs, or technical identifiers.
+- Errors per-locale are logged and skipped; a failure for one target locale does not abort translation of the others.
+
+#### Settings
+- `aiSettings.translateLocales`: array of locale strings (e.g. `['es-ES', 'fr-FR']`) drawn from `ai.private`. Must be added to the settings schema and frontend settings page when wiring the feature fully (currently the service is implemented but the route-level call is pending).
+
+#### Database migration system
 
 #### Overview
 A migration system allows upgrading from an existing `pwndoc-ng` instance without data loss. Set the `MIGRATE_FROM` environment variable in `docker-compose-dev.yml` to a MongoDB URI pointing at the source database. On the next backend startup, all pending migration steps are applied and recorded. Re-runs only apply new steps — the process is fully idempotent.
@@ -285,5 +300,5 @@ When a schema change is made to any model, a new step must be added:
 - [x] Fix finding data-loss race condition and dirty-tracking
 - [x] Reorganise Data section navigation
 - [x] Extend TemplateHint to all finding and audit fields for full inline template documentation
-- [ ] Auto-translate vulnerabilities to all configured locales on create/update
+- [x] Auto-translate vulnerabilities to all configured locales on create/update (service implemented; route wiring and settings UI pending)
 - [ ] Checklists feature (design TBD)
