@@ -85,7 +85,7 @@ The fixture `backend/tests/fixtures/test-vulnerabilities.json` contains 10 canon
 
 ### Dev environment stabilisation
 - Enabled HMR: configured nginx to proxy WebSocket upgrades; set `webSocketURL` in `quasar.conf.js`
-- Added explicit `autodoc-net` bridge network; all services join by name, replacing fragile `links`
+- Added explicit `autopwndoc-net` bridge network; all services join by name, replacing fragile `links`
 - Added `backend/nodemon.json` excluding `config.json` from watch to prevent infinite restart loop
 - Restored stable JWT secrets in `backend/src/config/config.json` dev section
 - Fixed ChromaDB volume mount path (`/chroma/chroma` → `/data`)
@@ -96,7 +96,7 @@ The fixture `backend/tests/fixtures/test-vulnerabilities.json` contains 10 canon
 - Fixed input focus loss in custom data lists by generating stable unique IDs instead of index-based ones
 
 ### UI modernisation and rebranding
-- Rebranded from `pwndoc-ng` to `autodoc` in `package.json`, logo assets, login page, and home layout
+- Rebranded from `pwndoc-ng` to `autopwndoc` in `package.json`, logo assets, login page, and home layout
 - Replaced grey/blue-grey colour palette with Tailwind-inspired slate scale (`$slate50`–`$slate900`)
 - Added global border-radius overrides: cards 14px, inputs 10px, buttons 6px
 - Dark mode: replaced material shadows with subtle 1px slate borders; fixed toggle off-state contrast; added teal accent for toggle on-state
@@ -281,12 +281,110 @@ Leave `MIGRATE_FROM=` (empty) or remove the variable entirely to skip migration 
 | 5 | `add-retest-fields-to-findings` | Sets `retestEvidence: ''` and `retestPassed: null` on all finding subdocuments that lack these fields (added by this project) |
 | 6 | `add-cvssv4-to-vulnerabilities` | Sets `cvssv4: ''` on all vulnerability documents that lack the field (added by this project) |
 | 7 | `add-cvssv4-to-findings` | Sets `cvssv4: ''` on all finding subdocuments that lack the field (added by this project) |
+| 8 | `add-executive-summary-to-audits` | Sets `executiveSummary: { overallRisk: '', summary: '', criticalSummary: '', highSummary: '', mediumSummary: '', lowSummary: '', informativeSummary: '' }` on all audit documents that lack the field (added by this project) |
 
 #### Adding a new migration step
 When a schema change is made to any model, a new step must be added:
 1. Open `backend/src/lib/migration.js` and append a new object to the `STEPS` array with a unique `id`, a descriptive `name`, and an `async run(srcDb, dstDb)` function.
 2. Document the new step in this table above.
 3. The step will only run on instances that have not yet applied it (tracked by `id` in `_migrations`).
+
+---
+
+### Executive Summary section
+
+A dedicated "Executive Summary" page has been added to the audit edit left drawer, appearing after Network Scan.
+
+#### Overview
+The page provides three panels:
+1. **Overall Risk Level** — a `q-select` dropdown with the 5 CVSS severity bands (Critical / High / Medium / Low / Informative), each colour-coded using `$settings.report.public.cvssColors` (the same colours used for findings). The selected value is stored as an English capitalised key and translated in the final report via the backend translate module.
+2. **Executive Summary text** — a full `basic-editor` instance with AI suggest (action: `executive-summary`; context: audit name + all finding titles).
+3. **Per-severity summaries** — one `basic-editor` per severity band. Fields are disabled (read-only, greyed out) when the audit has no findings of that severity. AI suggest passes only the findings of the corresponding severity as context (action: `severity-summary`).
+
+#### Backend
+- `backend/src/models/audit.js`: `executiveSummary` embedded object (`overallRisk`, `summary`, `criticalSummary`, `highSummary`, `mediumSummary`, `lowSummary`, `informativeSummary`) added to `AuditSchema`; `getGeneral` projection updated to include it.
+- `backend/src/routes/audit.js`: `PUT /api/audits/:id/general` accepts `executiveSummary` in body.
+- `backend/src/models/settings.js`: `ai.private.executiveSummarySystemPrompt` and `ai.private.severitySummarySystemPrompt` fields added.
+- `backend/src/lib/ai-service.js`: new `executive-summary` and `severity-summary` actions with default system/user prompt templates; context keys `auditName`, `severity`, `findingsDigest` supported; new prompts use `executiveSummarySystemPrompt`/`severitySummarySystemPrompt` settings for overrides.
+- `backend/src/lib/report-generator.js`: exposes `audit.overall_risk` (localised), `audit.executive_summary`, `audit.critical_summary`, `audit.high_summary`, `audit.medium_summary`, `audit.low_summary`, `audit.informative_summary` as docxtemplater variables.
+- `backend/src/translate/*.json`: added `Critical`, `Informative` (and updated `Low`/`High`/`Medium` where missing) to all backend locale files (es, fr, nl, ru) for `overall_risk` localisation in reports.
+
+#### Report template variables
+
+| Variable | Type | Description |
+|---|---|---|
+| `audit.overall_risk` | String | Localised risk label (e.g. `"Alto"` in Spanish) |
+| `audit.executive_summary` | HTML object | Use with `\| convertHTML` |
+| `audit.critical_summary` | HTML object | Use with `\| convertHTML` |
+| `audit.high_summary` | HTML object | Use with `\| convertHTML` |
+| `audit.medium_summary` | HTML object | Use with `\| convertHTML` |
+| `audit.low_summary` | HTML object | Use with `\| convertHTML` |
+| `audit.informative_summary` | HTML object | Use with `\| convertHTML` |
+
+#### Frontend
+- `frontend/src/pages/audits/edit/executive-summary/` — new child page (`index.vue`, `executive-summary.html`, `executive-summary.js`) following the existing split-file pattern. Props: `audit`, `frontEndAuditState`, `parentState`, `parentApprovals`.
+- `frontend/src/router/routes.js`: new route `executive-summary` nested under `/audits/:auditId`.
+- `frontend/src/pages/audits/edit/index.vue`: new `q-item` menu entry with `fa fa-file-alt` icon, inserted between Network Scan and Findings.
+- `frontend/src/pages/settings/settings.html` + `settings.js`: two new textarea inputs for `executiveSummarySystemPrompt` and `severitySummarySystemPrompt` in the Advanced Prompts sub-section of the AI settings card.
+- i18n: 15 new keys added to all 5 locale files (en-US, es-ES, fr-FR, de-DE, zh-CN): `executiveSummary`, `overallRisk`, `executiveSummaryText`, `severitySummaries`, `noFindingsOfSeverity`, `critical`, `high`, `medium`, `low`, `informative`, `executiveSummarySystemPrompt`, `executiveSummarySystemPromptHint`, `severitySummarySystemPrompt`, `severitySummarySystemPromptHint`.
+
+#### Migration
+- Step 8 (`add-executive-summary-to-audits`): sets the default empty `executiveSummary` object on all existing audit documents that lack the field.
+
+### AI settings overhaul
+
+#### Prompt customisation subsystem
+All AI generation prompts are now fully configurable per-action in the Settings → AI → Advanced Settings section.
+
+- **`backend/src/models/settings.js`**: added `ai.private` fields for every action: `generateSystemPrompt`, `generateUserPrompt`, `completeSystemPrompt`, `completeUserPrompt`, `rewriteSystemPrompt`, `rewriteUserPrompt`, `fillProofsSystemPrompt` (alongside the existing `executiveSummarySystemPrompt`, `severitySummarySystemPrompt`).
+- **`backend/src/lib/ai-service.js`**: each action now reads its own dedicated settings field; all default prompts include `{language}` (resolved from audit locale via `Intl.DisplayNames`) and relevant context slots (`{fieldName}`, `{findingTitle}`, `{similarVulnsBlock}`, `{text}`, `{auditName}`, `{severity}`, `{findingsDigest}`, etc.); `localeToLanguage()` helper added.
+- **`frontend/src/pages/settings/settings.html`**: Advanced Settings section replaced with 6 collapsible `q-expansion-item` sub-sections (Generate, Complete, Rewrite, Fill Proofs, Executive Summary, Severity Summary), each with system/user prompt textareas, per-field "Reset to default" buttons, and inline tag-reference hints. Available tags shown in a bar above all sections. Hint strings use static HTML attributes (not i18n) to avoid Vue i18n interpolating `{tag}` placeholders as empty variables.
+- **`frontend/src/pages/settings/settings.js`**: `DEFAULT_PROMPTS` constant expanded to all 9 prompts; `getSettings()` pre-fills empty fields with defaults; `resetPromptToDefault(key)` simplified to direct lookup; `promptTags` data array drives the tag-reference bar.
+- i18n: 20+ new keys added to all 5 locale files.
+
+#### AI connection tests
+A "Test connection" button is added below each AI sub-section (Generation, Embedding, Vision) in settings.
+
+- **`backend/src/routes/ai.js`**: `POST /api/ai/test` endpoint accepting `type: 'generation' | 'embedding' | 'vision'`. Each test performs a real round-trip: generation sends a minimal chat completion; embedding embeds a string and checks vector dimensions; vision sends a 50×50 white PNG and asks a colour question. Falls back to a user-supplied `backend/src/lib/test-assets/vision-test.png` if present. Supports reasoning/thinking models via `response.additional_kwargs?.reasoning_content` fallback. `maxTokens: 1024` to give thinking models room to reason.
+- **`frontend/src/services/ai.js`**: `testConnection(type)` method added.
+- **`frontend/src/pages/settings/settings.js`**: `aiTest` state map + `testAiConnection(type)` method; result shown inline (green check / red error) next to each button.
+- i18n: `aiTestConnection`, `aiTestOk`, `aiTestFailed` added to all 5 locale files.
+
+#### AI generation fixes
+- **`backend/src/routes/ai.js`**: action whitelist for `POST /api/ai/generate` extended to include `executive-summary` and `severity-summary` (were previously rejected with 400).
+- **`frontend/src/components/ai-assistant.js`**: context forwarding fixed to include `auditName`, `severity`, `findingsDigest` (were silently dropped, breaking executive summary AI generation).
+
+### Executive summary AI suggest buttons
+
+- **`frontend/src/pages/audits/edit/executive-summary/executive-summary.html`**: explicit "AI Suggest" purple buttons added above executive summary and per-severity editors (guarded by `$settings.ai.enabled`; severity buttons also gated on severity being present in the audit).
+- **`frontend/src/pages/audits/edit/executive-summary/executive-summary.js`**: `runAiOnEditor()` now shows a confirmation dialog when the target field already has content; `AiService` imported; `aiLoadingMap` tracks per-editor loading state.
+- **`frontend/src/i18n/*/index.js`**: `aiGenerateOverwriteConfirm` added to all 5 locales.
+
+### Findings digest enriched with severity and CVSS
+`findingsDigest` in the executive summary context now includes severity and CVSS score per finding (e.g. `- [High (CVSS: 7.5)] SQL Injection`), computed via the same CVSS 3.1/4.0 helper used elsewhere.
+
+### AI settings UI harmonisation
+- All three AI sub-sections (Generation Provider, Embedding, Vision) now use the same **4-column grid**: Provider · Model · API URL · API Key — API Key and URL no longer full-width in Embedding and Vision.
+- Temperature slider fixed: removed `label-always` (caused clipping), replaced with an explicit label + live value above the slider and `0 — precise` / `2 — creative` range labels below.
+
+### Editor improvements
+- **`frontend/src/components/editor.vue`**: AI Assistant sparkle icon (`auto_awesome`) and dropdown now coloured purple.
+- **`frontend/src/pages/audits/edit/findings/edit/edit.html`**: Affected Assets editor (`finding.scope`) — removed redundant `q-field borderless` wrapper (fixed boxy dark-mode appearance) and set `:toolbar="['format','marks','list']"` (removes AI, code, table, image from this field).
+- Removed dead "AI Suggest" purple button above the description field (duplicated the in-editor toolbar; `generateAiDescription` method and `aiLoading` data property removed).
+
+### LanguageTool integration
+- **`docker-compose-dev.yml`**: `languagetool` service added (`erikvl87/languagetool`, `Java_Xms=512m`, `Java_Xmx=1g`).
+- **`frontend/.docker/nginx.dev.conf`**: `location /v2` block added, proxying to `http://languagetool:8010` — the path used by the TipTap LanguageTool extension.
+
+### Docker / infrastructure fixes
+- **`docker-compose-dev.yml`**: frontend service renamed to `frontend-app` with `hostname: frontend` (nginx was resolving by hostname `frontend`, not service name `frontend-app`); `watch` blocks migrated to `develop.watch` (correct Compose spec v3.8+ syntax); `autopwndoc-net` network (renamed from `autodoc-net`).
+- **`backend/src/config/config.json`**: `database.server` corrected from `mongo-pwndoc-ng` to `mongodb` (actual service name on the Docker network).
+
+### Rebranding: autodoc → autopwndoc
+- **`frontend/package.json`**: `name`, `description`, `productName` updated to `autopwndoc`.
+- **`docker-compose-dev.yml`** + **`docker-compose.yml`**: Docker network renamed `autodoc-net` → `autopwndoc-net`.
+- **`frontend/public/`**: `autodoc-logo.png` → `autopwndoc-logo.png`; `autodoc-logo-slogan.png` → `autopwndoc-logo-slogan.png`; `logo_transparent.png`, `logo.png`, `favicon.png` replaced with new logo assets from `logo/`.
+- **`backend/src/lib/migration.js`**: JSDoc comment updated.
 
 ---
 
@@ -301,4 +399,8 @@ When a schema change is made to any model, a new step must be added:
 - [x] Reorganise Data section navigation
 - [x] Extend TemplateHint to all finding and audit fields for full inline template documentation
 - [x] Auto-translate vulnerabilities to all configured locales on create/update (service implemented; route wiring and settings UI pending)
+- [x] Executive Summary section (overall risk, summary text, per-severity summaries with AI suggest)
+- [x] AI settings overhaul — per-action prompt customisation, connection tests, UI harmonisation
+- [x] LanguageTool integration in dev environment
+- [x] Rebranding autodoc → autopwndoc
 - [ ] Checklists feature (design TBD)
