@@ -452,7 +452,7 @@ Exposed by `backend/src/lib/report-generator.js` for use in DOCX templates (docx
 
 | Step | Name | Description |
 |---|---|---|
-| 1 | `copy-base-collections` | Copies users, clients, companies, templates, languages, audit-types, vulnerability-types, vulnerability-categories, custom-sections, custom-fields, images verbatim from the source DB |
+| 1 | `copy-base-collections` | Copies clients, companies, templates, languages, audit-types, vulnerability-types/categories, custom-sections/fields, images by `_id` without overwriting existing documents. Users are matched by `username`: existing destination users are preserved, missing source users are inserted with `refreshTokens: []`, and audit user references are remapped when usernames already exist locally. |
 | 2 | `copy-vulnerabilities` | Copies the full vulnerabilities collection |
 | 3 | `copy-audits` | Copies the full audits collection |
 | 4 | `add-isRetest-to-audits` | Sets `isRetest: false` on all copied audits that lack the field |
@@ -582,6 +582,12 @@ The fixture `backend/tests/fixtures/test-vulnerabilities.json` contains 10 canon
 - `APP_URL` env var in both compose files drives the MCP endpoint URL in sample configs.
 - Sample config: `backend/src/config/mcp-server-sample.json` (Claude Desktop + curl).
 - Frontend: MCP Settings card in settings page — enable toggle, masked key, rotate/clear/copy, sample config snippets.
+
+### Migration and session hardening
+
+- `backend/src/lib/migration.js`: migration now waits for the destination Mongoose connection before accessing `mongoose.connection.db`, preventing startup failures when MongoDB recovery is still in progress.
+- User migration preserves existing destination accounts by matching source users on `username`; missing users are inserted with `refreshTokens: []`, and audit user references are remapped to preserved local users when needed.
+- `backend/src/routes/user.js`: refresh-token failures for missing sessions now return `401` and clear both auth cookies using the correct cookie path, preventing stale refresh-token retry loops after migration or DB replacement.
 
 ### OpenWebUI provider support
 
