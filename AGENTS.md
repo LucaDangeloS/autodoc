@@ -452,7 +452,7 @@ Exposed by `backend/src/lib/report-generator.js` for use in DOCX templates (docx
 
 | Step | Name | Description |
 |---|---|---|
-| 1 | `copy-base-collections` | Copies users, clients, companies, templates, languages, audit-types, vulnerability-types, vulnerability-categories, custom-sections, custom-fields, images verbatim from the source DB |
+| 1 | `copy-base-collections` | Copies clients, companies, templates, languages, audit-types, vulnerability-types/categories, custom-sections/fields, images verbatim (matched by `_id`, skips existing). Users are matched by `username` and merged with `$set` so the source password/role wins; `refreshTokens` is always cleared to avoid stale sessions. |
 | 2 | `copy-vulnerabilities` | Copies the full vulnerabilities collection |
 | 3 | `copy-audits` | Copies the full audits collection |
 | 4 | `add-isRetest-to-audits` | Sets `isRetest: false` on all copied audits that lack the field |
