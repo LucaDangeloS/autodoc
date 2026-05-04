@@ -16,7 +16,7 @@ This repository is a fork of `pwndoc-ng`, a pentest report generation tool, serv
 - **Documentation**: Everything implemented must be documented in this file under the Changes Log section. No exceptions.
 - **Restart affected containers**: After each change, the agent **must** restart the affected containers and check logs before reporting success:
   - **Backend changes** (`backend/src/**`): `docker compose -f docker-compose-dev.yml restart backend`
-  - **Frontend changes** (`frontend/src/**`, `frontend/quasar.conf.js`): HMR picks up most changes automatically; only restart if build config or a boot file is added → `docker compose -f docker-compose-dev.yml restart frontend-app`
+  - **Frontend changes** (`frontend/src/**`, `frontend/quasar.conf.js`): `docker compose -f docker-compose-dev.yml restart frontend-app`
   - **Infra changes** (`docker-compose-dev.yml`, `Dockerfile.dev`): `docker compose -f docker-compose-dev.yml up -d`
 
 ## Branch Policy
@@ -43,17 +43,17 @@ This repository is a fork of `pwndoc-ng`, a pentest report generation tool, serv
 | `docker-compose.yml` | Production stack (minimal, no dev tooling). |
 | `backend/Dockerfile.dev` | Backend dev image (Node + nodemon). |
 | `frontend/Dockerfile.dev` | Frontend dev image (Quasar CLI + webpack-dev-server). |
-| `frontend/.docker/nginx.dev.conf` | nginx reverse proxy — routes `/api` → backend, WebSocket HMR upgrades → frontend, `/v2` → LanguageTool. **Modify here when adding new proxy paths.** |
+| `frontend/.docker/nginx.dev.conf` | nginx reverse proxy — routes `/api` → backend, frontend dev server WebSocket upgrades → frontend, `/v2` → LanguageTool. **Modify here when adding new proxy paths.** |
 
 **Container restart rules:**
 
 | Changed files | Command |
 |---|---|
 | `backend/src/**` | `docker compose -f docker-compose-dev.yml restart backend` |
-| `frontend/src/**`, `frontend/quasar.conf.js` | HMR picks up automatically — restart only when adding a boot file or changing quasar.conf.js |
+| `frontend/src/**`, `frontend/quasar.conf.js` | `docker compose -f docker-compose-dev.yml restart frontend-app` |
 | `docker-compose-dev.yml`, any `Dockerfile.dev` | `docker compose -f docker-compose-dev.yml up -d` |
 
-Always tail logs after restart: `docker compose -f docker-compose-dev.yml logs --since 1m backend`
+Always tail logs after restart for the affected service, for example: `docker compose -f docker-compose-dev.yml logs --since 1m backend` or `docker compose -f docker-compose-dev.yml logs --since 1m frontend-app`
 
 ---
 
@@ -541,7 +541,7 @@ The fixture `backend/tests/fixtures/test-vulnerabilities.json` contains 10 canon
 - `backend/src/routes/ai.js`: `POST /api/ai/generate` (RAG + LLM), `/search-similar`, `/analyze-proofs`, `/reindex-all`, `/test`.
 - ChromaDB service in `docker-compose-dev.yml`; startup sync in `app.js`; fire-and-forget index/delete hooks in `vulnerability.js`.
 - Frontend: `services/ai.js`, `components/ai-assistant.js` (TipTap extension), AI toolbar in `editor.vue`, all finding editors wired with `fieldName` + `aiContext`.
-- `components/similar-vuln-modal.vue`: two-panel diff dialog; supports text-based and proof-based (vision) modes.
+- `components/similar-vuln-modal.vue`: two-panel diff dialog with viewport margins and Apply-action spacing; supports text-based and proof-based (vision) modes.
 
 ### Retest feature
 
@@ -589,6 +589,10 @@ The fixture `backend/tests/fixtures/test-vulnerabilities.json` contains 10 canon
 - `backend/src/lib/migration.js`: migration now waits for the destination Mongoose connection before accessing `mongoose.connection.db`, preventing startup failures when MongoDB recovery is still in progress.
 - User migration preserves existing destination accounts by matching source users on `username`; missing users are inserted with `refreshTokens: []`, and audit user references are remapped to preserved local users when needed.
 - `backend/src/routes/user.js`: refresh-token failures for missing sessions now return `401` and clear both auth cookies using the correct cookie path, preventing stale refresh-token retry loops after migration or DB replacement.
+
+### Agent workflow updates
+
+- Frontend changes under `frontend/src/**` or `frontend/quasar.conf.js` require `docker compose -f docker-compose-dev.yml restart frontend-app` followed by `docker compose -f docker-compose-dev.yml logs --since 1m frontend-app`.
 
 ### OpenWebUI provider support
 
