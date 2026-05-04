@@ -564,6 +564,7 @@ The fixture `backend/tests/fixtures/test-vulnerabilities.json` contains 10 canon
 - Per-field overrides (15 keys): `field_{fieldName}_{action}SystemPrompt` for each of `description`, `observation`, `remediation`, `poc`, `retestEvidence` × `generate`, `complete`, `rewrite`.
 - Connection test endpoint: `POST /api/ai/test` (`type: 'generation' | 'embedding' | 'vision'`).
 - UI: `settings.js` holds `DEFAULT_PROMPTS` (all 9 generic keys + 15 field keys), `aiFieldPromptFields` array, `testAiConnection()`.
+- UI: generation temperature uses a styled native range slider (`.ai-temperature-slider`) to remain visible in dark mode.
 
 ### Granular user permissions
 
