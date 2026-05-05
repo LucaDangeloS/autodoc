@@ -434,6 +434,7 @@ Exposed by `backend/src/lib/report-generator.js` for use in DOCX templates (docx
 | `finding.description`, `.observation`, `.remediation`, `.poc` | HTML object | Use `\| convertHTML` |
 | `finding.retest_evidence` | HTML object | Use `\| convertHTML` |
 | `finding.retest_passed` | Boolean/null | `true` = passed, `false` = failed, `null` = not set |
+| `finding.references_links` | OOXML string | Use raw tag `{@finding.references_links}` to render references as one hyperlink per line |
 | `finding.cvss.baseMetricScore` | Number | CVSS 3.1 |
 | `finding.cvss4.baseMetricScore` | Number | CVSS 4.0 |
 | `{#audit.collaborators}.firstname .lastname{/audit.collaborators}` | Loop | |
@@ -540,14 +541,23 @@ The fixture `backend/tests/fixtures/test-vulnerabilities.json` contains 10 canon
 - `backend/src/lib/vision-service.js`: multimodal proof analysis — extracts images from POC HTML, calls vision LLM, optional anonymisation.
 - `backend/src/routes/ai.js`: `POST /api/ai/generate` (RAG + LLM), `/search-similar`, `/analyze-proofs`, `/reindex-all`, `/test`.
 - ChromaDB service in `docker-compose-dev.yml`; startup sync in `app.js`; fire-and-forget index/delete hooks in `vulnerability.js`.
-- Frontend: `services/ai.js`, `components/ai-assistant.js` (TipTap extension), AI toolbar in `editor.vue`, all finding editors wired with `fieldName` + `aiContext`.
+- Frontend: `services/ai.js`, `components/ai-assistant.js` (TipTap extension), AI toolbar in `editor.vue`, all finding editors wired with `fieldName` + `aiContext`; AI editor actions now open a previous/proposed review dialog before applying generated text and clear loading state when the request finishes.
+- `components/ai-diff-modal.vue`: side-by-side AI comparison dialog with editable proposed text and explicit apply/keep controls.
 - `components/similar-vuln-modal.vue`: two-panel diff dialog with viewport margins and Apply-action spacing; supports text-based and proof-based (vision) modes.
+
+### Report references
+
+- `backend/src/lib/report-generator.js`: added `links` filter and `finding.references_links` report variable so finding references can render as one hyperlink paragraph per line in DOCX templates via `{@finding.references_links}`.
 
 ### Retest feature
 
 - `audit.js` model: `isRetest: Boolean` on `AuditSchema`; `retestEvidence: String`, `retestPassed: Boolean|null` on `Finding`.
 - Report variables: `audit.is_retest`, `finding.retest_evidence`, `finding.retest_passed`.
 - Frontend: `isRetest` toggle in general page; Retest Evidence tab in finding edit (visible only when `localAudit.isRetest`).
+
+### Finding deletion navigation
+
+- `frontend/src/pages/audits/edit/findings/edit/edit.js`: after deleting the currently open finding, navigation now selects an adjacent remaining finding when available and falls back to the audit General page when no finding exists or the adjacent navigation fails.
 
 ### Executive Summary section
 
@@ -589,6 +599,13 @@ The fixture `backend/tests/fixtures/test-vulnerabilities.json` contains 10 canon
 - `backend/src/lib/migration.js`: migration now waits for the destination Mongoose connection before accessing `mongoose.connection.db`, preventing startup failures when MongoDB recovery is still in progress.
 - User migration preserves existing destination accounts by matching source users on `username`; missing users are inserted with `refreshTokens: []`, and audit user references are remapped to preserved local users when needed.
 - `backend/src/routes/user.js`: refresh-token failures for missing sessions now return `401` and clear both auth cookies using the correct cookie path, preventing stale refresh-token retry loops after migration or DB replacement.
+
+### Default admin auto-seed
+
+- `backend/src/lib/seed-admin.js`: at every backend start the users collection is checked. When empty, a default admin (`admin` / `Admin1admin2`) is created automatically so a fresh stack always exposes working credentials. Existing accounts are never overwritten.
+- `RESET_DEFAULT_ADMIN=true` env var on the `backend` service forces the admin user back to the default password and clears all refresh tokens — safe escape hatch when a migrated database leaves an unknown admin password and login keeps returning 401 / "Invalid refreshToken".
+- `backend/src/lib/reset-default-admin.js` + `npm run reset-admin`: standalone script that connects to the configured database and restores the admin to default credentials. Run from the backend container: `docker exec -it autopwndoc-backend npm run reset-admin`.
+- Regression test: `backend/tests/auth-default.test.js` — boots from an empty users collection, asserts the seed creates the admin, performs a full login + refresh-token round-trip with the documented credentials, asserts wrong passwords return 401, and verifies `resetDefaultAdmin()` recovers the account when its password drifts. Hooked into `tests/index.test.js` between the unauthenticated and user suites.
 
 ### Agent workflow updates
 
